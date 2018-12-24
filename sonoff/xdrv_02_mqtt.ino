@@ -51,11 +51,14 @@
 #define MQTT_LIBRARY_TYPE      MQTT_PUBSUBCLIENT   // Use PubSubClient library as it only supports TLS
 #endif
 
-#endif
+#endif  //  USE_MQTT_TLS
 
 /*********************************************************************************************/
 
 #ifdef USE_MQTT_TLS
+#ifdef USE_MQTT_TLS_CA_CERT
+  #include "sonoff_letsencrypt.h"           // LetsEncrypt certificate
+#endif
   WiFiClientSecure EspClient;               // Wifi Secure Client
 #else
   WiFiClient EspClient;                     // Wifi Client
@@ -403,9 +406,7 @@ void MqttConnected(void)
     if (strstr(Settings.mqtt_fulltopic, MQTT_TOKEN_TOPIC) != NULL) {
       GetTopic_P(stopic, CMND, Settings.mqtt_grptopic, PSTR("#"));
       MqttSubscribe(stopic);
-      fallback_topic_flag = 1;
-      GetTopic_P(stopic, CMND, mqtt_client, PSTR("#"));
-      fallback_topic_flag = 0;
+      GetFallbackTopic_P(stopic, CMND, PSTR("#"));
       MqttSubscribe(stopic);
     }
 
@@ -414,7 +415,8 @@ void MqttConnected(void)
 
   if (mqtt_initial_connection_state) {
     snprintf_P(mqtt_data, sizeof(mqtt_data), PSTR("{\"" D_CMND_MODULE "\":\"%s\",\"" D_JSON_VERSION "\":\"%s%s\",\"" D_JSON_FALLBACKTOPIC "\":\"%s\",\"" D_CMND_GROUPTOPIC "\":\"%s\"}"),
-      my_module.name, my_version, my_image, mqtt_client, Settings.mqtt_grptopic);
+      my_module.name, my_version, my_image, GetFallbackTopic_P(stopic, CMND, ""), Settings.mqtt_grptopic);
+//      my_module.name, my_version, my_image, mqtt_client, Settings.mqtt_grptopic);
     MqttPublishPrefixTopic_P(TELE, PSTR(D_RSLT_INFO "1"));
 #ifdef USE_WEBSERVER
     if (Settings.webserver) {
@@ -467,6 +469,15 @@ boolean MqttCheckTls(void)
       Settings.mqtt_host, Settings.mqtt_port, mqtt_retry_counter);
     AddLog(LOG_LEVEL_DEBUG);
   } else {
+#ifdef USE_MQTT_TLS_CA_CERT
+    unsigned char tls_ca_cert[] = MQTT_TLS_CA_CERT;
+    if (EspClient.setCACert(tls_ca_cert, MQTT_TLS_CA_CERT_LENGTH)) {
+      if (EspClient.verifyCertChain(Settings.mqtt_host)) {
+        AddLog_P(LOG_LEVEL_INFO, S_LOG_MQTT, PSTR(D_VERIFIED "CA"));
+        result = true;
+      }
+    }
+#else
     if (EspClient.verify(fingerprint1, Settings.mqtt_host)) {
       AddLog_P(LOG_LEVEL_INFO, S_LOG_MQTT, PSTR(D_VERIFIED "1"));
       result = true;
@@ -475,6 +486,7 @@ boolean MqttCheckTls(void)
       AddLog_P(LOG_LEVEL_INFO, S_LOG_MQTT, PSTR(D_VERIFIED "2"));
       result = true;
     }
+#endif
   }
   if (!result) AddLog_P(LOG_LEVEL_INFO, S_LOG_MQTT, PSTR(D_FAILED));
   EspClient.stop();
